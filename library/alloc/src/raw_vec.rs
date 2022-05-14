@@ -26,6 +26,18 @@ enum AllocInit {
     Zeroed,
 }
 
+pub(crate) trait Length {
+    const DEFAULT: Self;
+}
+
+impl Length for () {
+    const DEFAULT: () = ();
+}
+
+impl Length for usize {
+    const DEFAULT: usize = 0;
+}
+
 /// A low-level utility for more ergonomically allocating, reallocating, and deallocating
 /// a buffer of memory on the heap without having to worry about all the corner cases
 /// involved. This type is excellent for building your own data structures like Vec and VecDeque.
@@ -49,13 +61,14 @@ enum AllocInit {
 /// `usize::MAX`. This means that you need to be careful when round-tripping this type with a
 /// `Box<[T]>`, since `capacity()` won't yield the length.
 #[allow(missing_debug_implementations)]
-pub(crate) struct RawVec<T, A: Allocator = Global> {
+pub(crate) struct RawVec<T, A: Allocator = Global, L: Length = ()> {
     ptr: Unique<T>,
+    pub len: L,
     cap: usize,
     alloc: A,
 }
 
-impl<T> RawVec<T, Global> {
+impl<T, L: Length> RawVec<T, Global, L> {
     /// HACK(Centril): This exists because stable `const fn` can only call stable `const fn`, so
     /// they cannot call `Self::new()`.
     ///
@@ -102,7 +115,7 @@ impl<T> RawVec<T, Global> {
     }
 }
 
-impl<T, A: Allocator> RawVec<T, A> {
+impl<T, A: Allocator, L: Length> RawVec<T, A, L> {
     // Tiny Vecs are dumb. Skip to:
     // - 8 if the element size is 1, because any heap allocators is likely
     //   to round up a request of less than 8 bytes to at least 8 bytes.
@@ -120,7 +133,7 @@ impl<T, A: Allocator> RawVec<T, A> {
     /// the returned `RawVec`.
     pub const fn new_in(alloc: A) -> Self {
         // `cap: 0` means "unallocated". zero-sized types are ignored.
-        Self { ptr: Unique::dangling(), cap: 0, alloc }
+        Self { ptr: Unique::dangling(), len: L::DEFAULT, cap: 0, alloc }
     }
 
     /// Like `with_capacity`, but parameterized over the choice of
@@ -195,6 +208,7 @@ impl<T, A: Allocator> RawVec<T, A> {
             // here should change to `ptr.len() / mem::size_of::<T>()`.
             Self {
                 ptr: unsafe { Unique::new_unchecked(ptr.cast().as_ptr()) },
+                len: L::DEFAULT,
                 cap: capacity,
                 alloc,
             }
@@ -213,7 +227,7 @@ impl<T, A: Allocator> RawVec<T, A> {
     /// guaranteed.
     #[inline]
     pub unsafe fn from_raw_parts_in(ptr: *mut T, capacity: usize, alloc: A) -> Self {
-        Self { ptr: unsafe { Unique::new_unchecked(ptr) }, cap: capacity, alloc }
+        Self { ptr: unsafe { Unique::new_unchecked(ptr) }, len: L::DEFAULT, cap: capacity, alloc }
     }
 
     /// Gets a raw pointer to the start of the allocation. Note that this is
@@ -277,8 +291,8 @@ impl<T, A: Allocator> RawVec<T, A> {
         // handle_reserve behind a call, while making sure that this function is likely to be
         // inlined as just a comparison and a call if the comparison fails.
         #[cold]
-        fn do_reserve_and_handle<T, A: Allocator>(
-            slf: &mut RawVec<T, A>,
+        fn do_reserve_and_handle<T, A: Allocator, L: Length>(
+            slf: &mut RawVec<T, A, L>,
             len: usize,
             additional: usize,
         ) {
@@ -354,7 +368,7 @@ impl<T, A: Allocator> RawVec<T, A> {
     }
 }
 
-impl<T, A: Allocator> RawVec<T, A> {
+impl<T, A: Allocator, L: Length> RawVec<T, A, L> {
     /// Returns if the buffer needs to grow to fulfill the needed extra capacity.
     /// Mainly used to make inlining reserve-calls possible without inlining `grow`.
     fn needs_to_grow(&self, len: usize, additional: usize) -> bool {
@@ -471,7 +485,7 @@ where
     memory.map_err(|_| AllocError { layout: new_layout, non_exhaustive: () }.into())
 }
 
-unsafe impl<#[may_dangle] T, A: Allocator> Drop for RawVec<T, A> {
+unsafe impl<#[may_dangle] T, A: Allocator, L: Length> Drop for RawVec<T, A, L> {
     /// Frees the memory owned by the `RawVec` *without* trying to drop its contents.
     fn drop(&mut self) {
         if let Some((ptr, layout)) = self.current_memory() {

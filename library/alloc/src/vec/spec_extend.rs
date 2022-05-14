@@ -36,7 +36,7 @@ where
             self.reserve(additional);
             unsafe {
                 let mut ptr = self.as_mut_ptr().add(self.len());
-                let mut local_len = SetLenOnDrop::new(&mut self.len);
+                let mut local_len = SetLenOnDrop::new(self.len_mut());
                 iterator.for_each(move |element| {
                     ptr::write(ptr, element);
                     ptr = ptr.offset(1);

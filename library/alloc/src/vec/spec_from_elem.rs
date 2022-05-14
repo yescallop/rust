@@ -21,7 +21,9 @@ impl SpecFromElem for i8 {
     #[inline]
     fn from_elem<A: Allocator>(elem: i8, n: usize, alloc: A) -> Vec<i8, A> {
         if elem == 0 {
-            return Vec { buf: RawVec::with_capacity_zeroed_in(n, alloc), len: n };
+            let mut buf = RawVec::with_capacity_zeroed_in(n, alloc);
+            buf.len = n;
+            return Vec { buf };
         }
         unsafe {
             let mut v = Vec::with_capacity_in(n, alloc);
@@ -36,7 +38,9 @@ impl SpecFromElem for u8 {
     #[inline]
     fn from_elem<A: Allocator>(elem: u8, n: usize, alloc: A) -> Vec<u8, A> {
         if elem == 0 {
-            return Vec { buf: RawVec::with_capacity_zeroed_in(n, alloc), len: n };
+            let mut buf = RawVec::with_capacity_zeroed_in(n, alloc);
+            buf.len = n;
+            return Vec { buf };
         }
         unsafe {
             let mut v = Vec::with_capacity_in(n, alloc);
@@ -51,7 +55,9 @@ impl<T: Clone + IsZero> SpecFromElem for T {
     #[inline]
     fn from_elem<A: Allocator>(elem: T, n: usize, alloc: A) -> Vec<T, A> {
         if elem.is_zero() {
-            return Vec { buf: RawVec::with_capacity_zeroed_in(n, alloc), len: n };
+            let mut buf = RawVec::with_capacity_zeroed_in(n, alloc);
+            buf.len = n;
+            return Vec { buf };
         }
         let mut v = Vec::with_capacity_in(n, alloc);
         v.extend_with(n, ExtendElement(elem));

@@ -1,7 +1,6 @@
 #[cfg(not(no_global_oom_handling))]
 use super::AsVecIntoIter;
 use crate::alloc::{Allocator, Global};
-use crate::raw_vec::RawVec;
 use core::fmt;
 use core::intrinsics::arith_offset;
 use core::iter::{
@@ -12,6 +11,8 @@ use core::mem::{self, ManuallyDrop};
 use core::ops::Deref;
 use core::ptr::{self, NonNull};
 use core::slice::{self};
+
+type RawVec<T, A> = crate::raw_vec::RawVec<T, A>;
 
 /// An iterator that moves out of a vector.
 ///
