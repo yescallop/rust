@@ -1126,7 +1126,7 @@ impl<'a> Extensions<'a> {
     /// assert_eq!(exts.next(), Some(OsStr::new(".gz")));
     /// assert_eq!(exts.next(), Some(OsStr::new(".tar")));
     /// assert_eq!(exts.next(), None);
-    /// assert_eq!(exts.visited(), ".tar.gz");
+    /// assert_eq!(exts.visited(), Some(OsStr::new(".tar.gz")));
     /// assert_eq!(exts.remaining_stem(), "foo");
     /// ```
     #[must_use]
@@ -1142,13 +1142,14 @@ impl<'a> Extensions<'a> {
     ///
     /// ```
     /// #![feature(path_extensions)]
+    /// use std::ffi::OsStr;
     /// use std::path::Path;
     ///
     /// let exts = Path::new("foo.tar.gz")
     ///     .extensions()
     ///     .unwrap()
     ///     .skip_all();
-    /// assert_eq!(exts.visited(), "tar.gz");
+    /// assert_eq!(exts.visited(), Some(OsStr::new("tar.gz")));
     /// assert_eq!(exts.remaining_stem(), "foo");
     /// ```
     #[must_use]
@@ -1158,15 +1159,15 @@ impl<'a> Extensions<'a> {
         self
     }
 
-    /// Returns the visited extensions as a consecutive [`OsStr`].
+    /// Returns the visited extensions as a consecutive [`OsStr`], if any.
     #[must_use]
     #[inline]
-    pub fn visited(&self) -> &'a OsStr {
+    pub fn visited(&self) -> Option<&'a OsStr> {
         if self.file.len() == self.dot_i {
-            return OsStr::new("");
+            return None;
         }
         let start = self.dot_i + self.no_preceding_dots as usize;
-        unsafe { u8_slice_as_os_str(&self.file.bytes()[start..]) }
+        Some(unsafe { u8_slice_as_os_str(&self.file.bytes()[start..]) })
     }
 
     /// Returns the remaining file stem.
@@ -2533,7 +2534,7 @@ impl Path {
     /// assert_eq!(exts.next(), Some(OsStr::new("gz")));
     /// assert_eq!(exts.next(), Some(OsStr::new("tar")));
     /// assert_eq!(exts.next(), None);
-    /// assert_eq!(exts.visited(), "tar.gz");
+    /// assert_eq!(exts.visited(), Some(OsStr::new("tar.gz")));
     /// assert_eq!(exts.remaining_stem(), "foo");
     /// ```
     #[unstable(feature = "path_extensions", issue = "none")]
