@@ -1136,6 +1136,28 @@ impl<'a> Extensions<'a> {
         self
     }
 
+    /// Skips all extensions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(path_extensions)]
+    /// use std::path::Path;
+    ///
+    /// let exts = Path::new("foo.tar.gz")
+    ///     .extensions()
+    ///     .unwrap()
+    ///     .skip_all();
+    /// assert_eq!(exts.visited(), "tar.gz");
+    /// assert_eq!(exts.remaining_stem(), "foo");
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn skip_all(mut self) -> Self {
+        self.dot_i = split_file_at_dot(self.file).0.len();
+        self
+    }
+
     /// Returns the visited extensions as a consecutive [`OsStr`].
     #[must_use]
     #[inline]
