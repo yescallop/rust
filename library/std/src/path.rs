@@ -330,10 +330,6 @@ fn has_physical_root(s: &[u8], prefix: Option<Prefix<'_>>) -> bool {
 
 // basic workhorse for splitting stem and extension
 fn rsplit_file_at_dot(file: &OsStr) -> (Option<&OsStr>, Option<&OsStr>) {
-    if file.bytes() == b".." {
-        return (Some(file), None);
-    }
-
     // The unsafety here stems from converting between &OsStr and &[u8]
     // and back. This is safe to do because (1) we only look at ASCII
     // contents of the encoding and (2) new &OsStr values are produced
@@ -350,9 +346,6 @@ fn rsplit_file_at_dot(file: &OsStr) -> (Option<&OsStr>, Option<&OsStr>) {
 
 fn split_file_at_dot(file: &OsStr) -> (&OsStr, Option<&OsStr>) {
     let slice = file.bytes();
-    if slice == b".." {
-        return (file, None);
-    }
 
     // The unsafety here stems from converting between &OsStr and &[u8]
     // and back. This is safe to do because (1) we only look at ASCII
@@ -1104,6 +1097,85 @@ impl<'a> Iterator for Ancestors<'a> {
 
 #[stable(feature = "path_ancestors", since = "1.28.0")]
 impl FusedIterator for Ancestors<'_> {}
+
+/// An iterator over the extensions of a file name.
+#[derive(Debug, Clone)]
+#[must_use = "iterators are lazy and do nothing unless consumed"]
+#[unstable(feature = "path_extensions", issue = "none")]
+pub struct Extensions<'a> {
+    file: &'a OsStr,
+    dot_i: usize,
+    no_preceding_dots: bool,
+}
+
+#[unstable(feature = "path_extensions", issue = "none")]
+impl<'a> Extensions<'a> {
+    /// Makes this iterator return extensions with preceding dots (`.`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(path_extensions)]
+    /// use std::path::Path;
+    /// use std::ffi::OsStr;
+    ///
+    /// let mut exts = Path::new("foo.tar.gz")
+    ///     .extensions()
+    ///     .unwrap()
+    ///     .with_preceding_dots();
+    /// assert_eq!(exts.next(), Some(OsStr::new(".gz")));
+    /// assert_eq!(exts.next(), Some(OsStr::new(".tar")));
+    /// assert_eq!(exts.next(), None);
+    /// assert_eq!(exts.visited(), ".tar.gz");
+    /// assert_eq!(exts.remaining_stem(), "foo");
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn with_preceding_dots(mut self) -> Self {
+        self.no_preceding_dots = false;
+        self
+    }
+
+    /// Returns the visited extensions as a consecutive [`OsStr`].
+    #[must_use]
+    #[inline]
+    pub fn visited(&self) -> &'a OsStr {
+        if self.file.len() == self.dot_i {
+            return OsStr::new("");
+        }
+        let start = self.dot_i + self.no_preceding_dots as usize;
+        unsafe { u8_slice_as_os_str(&self.file.bytes()[start..]) }
+    }
+
+    /// Returns the remaining file stem.
+    #[must_use]
+    #[inline]
+    pub fn remaining_stem(&self) -> &'a OsStr {
+        unsafe { u8_slice_as_os_str(&self.file.bytes()[..self.dot_i]) }
+    }
+}
+
+#[unstable(feature = "path_extensions", issue = "none")]
+impl<'a> Iterator for Extensions<'a> {
+    type Item = &'a OsStr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let file = unsafe { u8_slice_as_os_str(&self.file.bytes()[..self.dot_i]) };
+        let (before, after) = rsplit_file_at_dot(file);
+        match (before, after) {
+            (None, _) | (Some(_), None) => None,
+            (Some(stem), Some(_)) => {
+                let ext_start = stem.len() + self.no_preceding_dots as usize;
+                let ext_bytes = &file.bytes()[ext_start..];
+                self.dot_i = stem.len();
+                Some(unsafe { u8_slice_as_os_str(ext_bytes) })
+            }
+        }
+    }
+}
+
+#[unstable(feature = "path_extensions", issue = "none")]
+impl FusedIterator for Extensions<'_> {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Basic types and traits
@@ -2424,6 +2496,28 @@ impl Path {
     #[must_use]
     pub fn extension(&self) -> Option<&OsStr> {
         self.file_name().map(rsplit_file_at_dot).and_then(|(before, after)| before.and(after))
+    }
+
+    /// Returns an iterator over the extensions of [`self.file_name`], if possible.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(path_extensions)]
+    /// use std::path::Path;
+    /// use std::ffi::OsStr;
+    ///
+    /// let mut exts = Path::new("foo.tar.gz").extensions().unwrap();
+    /// assert_eq!(exts.next(), Some(OsStr::new("gz")));
+    /// assert_eq!(exts.next(), Some(OsStr::new("tar")));
+    /// assert_eq!(exts.next(), None);
+    /// assert_eq!(exts.visited(), "tar.gz");
+    /// assert_eq!(exts.remaining_stem(), "foo");
+    /// ```
+    #[unstable(feature = "path_extensions", issue = "none")]
+    #[must_use]
+    pub fn extensions(&self) -> Option<Extensions<'_>> {
+        self.file_name().map(|file| Extensions { file, dot_i: file.len(), no_preceding_dots: true })
     }
 
     /// Creates an owned [`PathBuf`] with `path` adjoined to `self`.
