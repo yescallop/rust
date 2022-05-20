@@ -1099,43 +1099,20 @@ impl<'a> Iterator for Ancestors<'a> {
 impl FusedIterator for Ancestors<'_> {}
 
 /// An iterator over the extensions of a file name.
-#[derive(Debug, Clone)]
+///
+/// This struct is created by the [`extensions`] method on [`Path`]. See its documentation for more.
+///
+/// [`extensions`]: Path::extensions
+#[derive(Clone)]
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 #[unstable(feature = "path_extensions", issue = "none")]
 pub struct Extensions<'a> {
     file: &'a OsStr,
     dot_i: usize,
-    no_preceding_dots: bool,
 }
 
 #[unstable(feature = "path_extensions", issue = "none")]
 impl<'a> Extensions<'a> {
-    /// Makes this iterator return extensions with preceding dots (`.`).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(path_extensions)]
-    /// use std::path::Path;
-    /// use std::ffi::OsStr;
-    ///
-    /// let mut exts = Path::new("foo.tar.gz")
-    ///     .extensions()
-    ///     .unwrap()
-    ///     .with_preceding_dots();
-    /// assert_eq!(exts.next(), Some(OsStr::new(".gz")));
-    /// assert_eq!(exts.next(), Some(OsStr::new(".tar")));
-    /// assert_eq!(exts.next(), None);
-    /// assert_eq!(exts.visited(), Some(OsStr::new(".tar.gz")));
-    /// assert_eq!(exts.remaining_stem(), "foo");
-    /// ```
-    #[must_use]
-    #[inline]
-    pub fn with_preceding_dots(mut self) -> Self {
-        self.no_preceding_dots = false;
-        self
-    }
-
     /// Skips all extensions.
     ///
     /// # Examples
@@ -1145,35 +1122,65 @@ impl<'a> Extensions<'a> {
     /// use std::ffi::OsStr;
     /// use std::path::Path;
     ///
-    /// let exts = Path::new("foo.tar.gz")
-    ///     .extensions()
-    ///     .unwrap()
-    ///     .skip_all();
+    /// let mut exts = Path::new("foo.tar.gz").extensions().unwrap();
+    /// exts.skip_all();
     /// assert_eq!(exts.visited(), Some(OsStr::new("tar.gz")));
-    /// assert_eq!(exts.remaining_stem(), "foo");
+    /// assert_eq!(exts.remaining(), "foo");
     /// ```
-    #[must_use]
-    #[inline]
-    pub fn skip_all(mut self) -> Self {
-        self.dot_i = split_file_at_dot(self.file).0.len();
+    pub fn skip_all(&mut self) -> &Self {
+        if let Some(i) = self.file.bytes()[1..].iter().position(|b| *b == b'.') {
+            self.dot_i = i + 1;
+        }
         self
     }
 
     /// Returns the visited extensions as a consecutive [`OsStr`], if any.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(path_extensions)]
+    /// use std::ffi::OsStr;
+    /// use std::path::Path;
+    ///
+    /// let mut exts = Path::new("foo.tar.gz").extensions().unwrap();
+    /// assert_eq!(exts.visited(), None);
+    ///
+    /// exts.next();
+    /// assert_eq!(exts.visited(), Some(OsStr::new("gz")));
+    ///
+    /// exts.next();
+    /// assert_eq!(exts.visited(), Some(OsStr::new("tar.gz")));
+    /// ```
     #[must_use]
-    #[inline]
     pub fn visited(&self) -> Option<&'a OsStr> {
         if self.file.len() == self.dot_i {
             return None;
         }
-        let start = self.dot_i + self.no_preceding_dots as usize;
-        Some(unsafe { u8_slice_as_os_str(&self.file.bytes()[start..]) })
+        // SAFETY: `self.dot_i` always lies on a dot if not on the end of the slice.
+        Some(unsafe { u8_slice_as_os_str(&self.file.bytes()[self.dot_i + 1..]) })
     }
 
-    /// Returns the remaining file stem.
+    /// Extracts a slice corresponding to the part of file name remaining for iteration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(path_extensions)]
+    /// use std::path::Path;
+    ///
+    /// let mut exts = Path::new("foo.tar.gz").extensions().unwrap();
+    /// assert_eq!(exts.remaining(), "foo.tar.gz");
+    ///
+    /// exts.next();
+    /// assert_eq!(exts.remaining(), "foo.tar");
+    ///
+    /// exts.next();
+    /// assert_eq!(exts.remaining(), "foo");
+    /// ```
     #[must_use]
-    #[inline]
-    pub fn remaining_stem(&self) -> &'a OsStr {
+    pub fn remaining(&self) -> &'a OsStr {
+        // SAFETY: `self.dot_i` always lies on a dot or on the end of the slice.
         unsafe { u8_slice_as_os_str(&self.file.bytes()[..self.dot_i]) }
     }
 }
@@ -1183,15 +1190,13 @@ impl<'a> Iterator for Extensions<'a> {
     type Item = &'a OsStr;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let file = unsafe { u8_slice_as_os_str(&self.file.bytes()[..self.dot_i]) };
+        let file = self.remaining();
         let (before, after) = rsplit_file_at_dot(file);
         match (before, after) {
             (None, _) | (Some(_), None) => None,
-            (Some(stem), Some(_)) => {
-                let ext_start = stem.len() + self.no_preceding_dots as usize;
-                let ext_bytes = &file.bytes()[ext_start..];
+            (Some(stem), Some(ext)) => {
                 self.dot_i = stem.len();
-                Some(unsafe { u8_slice_as_os_str(ext_bytes) })
+                Some(ext)
             }
         }
     }
@@ -1199,6 +1204,16 @@ impl<'a> Iterator for Extensions<'a> {
 
 #[unstable(feature = "path_extensions", issue = "none")]
 impl FusedIterator for Extensions<'_> {}
+
+#[unstable(feature = "path_extensions", issue = "none")]
+impl fmt::Debug for Extensions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Extensions")
+            .field("visited", &self.visited())
+            .field("remaining", &self.remaining())
+            .finish()
+    }
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Basic types and traits
@@ -2523,24 +2538,32 @@ impl Path {
 
     /// Returns an iterator over the extensions of [`self.file_name`], if possible.
     ///
+    /// This method returns [`None`] if there is no file name.
+    ///
+    /// Extensions are extracted recursively according to the algorithm described in the
+    /// [`extension`] method.
+    ///
+    /// [`self.file_name`]: Path::file_name
+    /// [`extension`]: Path::extension
+    ///
     /// # Examples
     ///
     /// ```
     /// #![feature(path_extensions)]
-    /// use std::path::Path;
     /// use std::ffi::OsStr;
+    /// use std::path::Path;
     ///
     /// let mut exts = Path::new("foo.tar.gz").extensions().unwrap();
     /// assert_eq!(exts.next(), Some(OsStr::new("gz")));
     /// assert_eq!(exts.next(), Some(OsStr::new("tar")));
     /// assert_eq!(exts.next(), None);
     /// assert_eq!(exts.visited(), Some(OsStr::new("tar.gz")));
-    /// assert_eq!(exts.remaining_stem(), "foo");
+    /// assert_eq!(exts.remaining(), "foo");
     /// ```
     #[unstable(feature = "path_extensions", issue = "none")]
     #[must_use]
     pub fn extensions(&self) -> Option<Extensions<'_>> {
-        self.file_name().map(|file| Extensions { file, dot_i: file.len(), no_preceding_dots: true })
+        self.file_name().map(|file| Extensions { file, dot_i: file.len() })
     }
 
     /// Creates an owned [`PathBuf`] with `path` adjoined to `self`.
